@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Űrhajó Misszió PWA</title>
+    <link rel="shortcut icon" href="icon-192.png">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00ffcc">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <style>
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            overflow: hidden; background: #050510; touch-action: none; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas { display: block; background: radial-gradient(circle, #0c1421 0%, #050508 100%); }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            pointer-events: none; color: #00ffcc;
+        }
+        
+        .menu {
+            pointer-events: auto; background: rgba(10, 10, 30, 0.9);
+            padding: 30px; border: 2px solid #00ffcc; border-radius: 20px;
+            text-align: center; box-shadow: 0 0 30px rgba(0, 255, 204, 0.3);
+        }
+
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+
+        button {
+            padding: 12px 20px; font-size: 1rem; cursor: pointer;
+            background: transparent; border: 1px solid #00ffcc; color: #00ffcc;
+            border-radius: 5px; transition: 0.3s;
+        }
+
+        button:hover { background: #00ffcc; color: #050510; }
+        #score-display { position: absolute; top: 20px; font-size: 1.5rem; text-shadow: 0 0 10px #00ffcc; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="score-display">PONT: 0</div>
+        <div id="start-menu" class="menu">
+            <h1>ŰRHAJÓ KONTROLL</h1>
+            <p>Válassz nehézségi szintet:</p>
+            <div class="btn-group">
+                <button onclick="startGame('easy')">EASY</button>
+                <button onclick="startGame('normal')">NORMAL</button>
+                <button onclick="startGame('hard')">HARD</button>
+            </div>
+        </div>
+        <div id="game-over" class="menu" style="display: none;">
+            <h1 style="color: #ff00ff;">BUMM! ÜTKÖZÉS</h1>
+            <button onclick="showMenu()">VISSZA A MENÜBE</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <audio id="snd-hit" src="https://www.soundjay.com/buttons/sounds/beep-07.mp3"></audio>
+    <audio id="snd-start" src="https://www.soundjay.com/transportation/sounds/rocket-launch-01.mp3"></audio>
+
+    <script>
+        // PWA Service Worker regisztráció
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(err => console.log("SW hiba", err));
+            });
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score-display');
+        const startMenu = document.getElementById('start-menu');
+        const gameOverMenu = document.getElementById('game-over');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let score = 0, gameActive = false, obstacles = [];
+        let ship = { x: canvas.width / 2, y: canvas.height - 100, size: 50 };
+        let config = { speedMin: 1.5, speedMax: 2.5, spawnRate: 0.02, randomFactor: 1 };
+
+        function startGame(level) {
+            if (level === 'easy') config = { speedMin: 1.2, speedMax: 2.2, spawnRate: 0.015, randomFactor: 1 };
+            else if (level === 'normal') config = { speedMin: 2.5, speedMax: 4.5, spawnRate: 0.04, randomFactor: 3 };
+            else if (level === 'hard') config = { speedMin: 5.0, speedMax: 8.0, spawnRate: 0.07, randomFactor: 5 };
+
+            score = 0; obstacles = []; gameActive = true;
+            startMenu.style.display = 'none'; gameOverMenu.style.display = 'none';
+            scoreEl.innerText = "PONT: 0";
+            document.getElementById('snd-start').play().catch(() => {});
+            requestAnimationFrame(update);
+        }
+
+        function showMenu() {
+            gameActive = false;
+            gameOverMenu.style.display = 'none';
+            startMenu.style.display = 'block';
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function moveShip(e) {
+            if (!gameActive) return;
+            let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            ship.x = clientX; ship.y = clientY;
+        }
+
+        window.addEventListener('mousemove', moveShip);
+        window.addEventListener('touchmove', moveShip, { passive: false });
+
+        function spawnObstacle() {
+            obstacles.push({
+                x: Math.random() * canvas.width, y: -60, size: 30,
+                speed: Math.random() * (config.speedMax - config.speedMin) + config.speedMin,
+                icon: "☄️"
+            });
+            for(let i = 0; i < config.randomFactor; i++) {
+                if(Math.random() < 0.05) {
+                    obstacles.push({
+                        x: Math.random() * canvas.width, y: -100 - (Math.random() * 200),
+                        size: 25, speed: config.speedMax * 1.2, icon: "👾"
+                    });
+                }
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "50px serif";
+            ctx.textAlign = "center";
+            ctx.fillText("🚀", ship.x, ship.y);
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let o = obstacles[i];
+                o.y += o.speed;
+                ctx.font = o.size + "px serif";
+                ctx.fillText(o.icon, o.x, o.y);
+
+                const dx = ship.x - o.x;
+                const dy = ship.y - o.y;
+                if (Math.sqrt(dx*dx + dy*dy) < (ship.size/2 + o.size/2.5)) endGame();
+
+                if (o.y > canvas.height + 60) {
+                    obstacles.splice(i, 1);
+                    score++;
+                    scoreEl.innerText = "PONT: " + score;
+                }
+            }
+            if (Math.random() < config.spawnRate) spawnObstacle();
+            requestAnimationFrame(update);
+        }
+
+        function endGame() {
+            gameActive = false;
+            document.getElementById('snd-hit').play().catch(() => {});
+            gameOverMenu.style.display = 'block';
+        }
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>{
+  "short_name": "Űrhajó",
+  "name": "Űrhajó Misszió Játék",
+  "description": "Egy egyszerű űrhajós játék PWA formátumban.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1066/1066371.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "index.html",
+  "background_color": "#050510",
+  "display": "standalone",
+  "scope": "./",
+  "theme_color": "#00ffcc"
+}
+
+const CACHE_NAME = 'urhajo-v1';
+const assets = [
+  './index.html',
+  './manifest.json',
+  'https://www.soundjay.com/buttons/sounds/beep-07.mp3',
+  'https://www.soundjay.com/transportation/sounds/rocket-launch-01.mp3'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      return cache.addAll(assets);
+    })
+  );
+});
+
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request).then(response => {
+      return response || fetch(event.request);
+    })
+  );
+});
+
+
+
